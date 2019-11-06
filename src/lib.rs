@@ -49,6 +49,7 @@ extern crate bitcoin_hashes;
 extern crate byteorder;
 extern crate hex;
 extern crate secp256k1;
+extern crate rand;
 #[cfg(feature = "serde")] extern crate serde;
 #[cfg(all(test, feature = "serde"))] #[macro_use] extern crate serde_derive; // for 1.22.0 compat
 #[cfg(all(test, feature = "serde"))] extern crate serde_json;

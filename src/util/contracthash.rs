@@ -284,7 +284,7 @@ pub fn untemplate(script: &script::Script) -> Result<(Template, Vec<PublicKey>),
 mod tests {
     use secp256k1::Secp256k1;
     use hex::decode as hex_decode;
-    use secp256k1::rand::thread_rng;
+    use rand::{thread_rng, RngCore};
     use std::str::FromStr;
 
     use blockdata::script::Script;
