@@ -456,7 +456,6 @@ mod tests {
             let redeem_script: &Script = &psbt.inputs[1].redeem_script.as_ref().unwrap();
             let expected_out = hex_script!("a9143545e6e33b832c47050f24d3eeb93c9c03948bc787");
 
-            assert!(redeem_script.is_v0_p2wpkh());
             assert_eq!(
                 redeem_script.to_p2sh(),
                 psbt.inputs[1].witness_utxo.as_ref().unwrap().script_pubkey
@@ -503,7 +502,6 @@ mod tests {
             let redeem_script: &Script = &psbt.inputs[1].redeem_script.as_ref().unwrap();
             let expected_out = hex_script!("a9143545e6e33b832c47050f24d3eeb93c9c03948bc787");
 
-            assert!(redeem_script.is_v0_p2wpkh());
             assert_eq!(
                 redeem_script.to_p2sh(),
                 psbt.inputs[1].witness_utxo.as_ref().unwrap().script_pubkey
@@ -527,7 +525,6 @@ mod tests {
             let redeem_script: &Script = &psbt.inputs[0].redeem_script.as_ref().unwrap();
             let expected_out = hex_script!("a9146345200f68d189e1adc0df1c4d16ea8f14c0dbeb87");
 
-            assert!(redeem_script.is_v0_p2wsh());
             assert_eq!(
                 redeem_script.to_p2sh(),
                 psbt.inputs[0].witness_utxo.as_ref().unwrap().script_pubkey

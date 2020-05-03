@@ -29,7 +29,7 @@ use std::{error, fmt, io};
 
 #[cfg(feature = "serde")] use serde;
 
-use hash_types::{ScriptHash, WScriptHash};
+use hash_types::{ScriptHash};
 use blockdata::opcodes;
 use consensus::{encode, Decodable, Encodable};
 use hashes::Hash;
@@ -239,14 +239,6 @@ impl Script {
                       .into_script()
     }
 
-    /// Compute the P2WSH output corresponding to this witnessScript (aka the "witness redeem
-    /// script")
-    pub fn to_v0_p2wsh(&self) -> Script {
-        Builder::new().push_int(0)
-                      .push_slice(&WScriptHash::hash(&self.0)[..])
-                      .into_script()
-    }
-
     /// Checks whether a script pubkey is a p2sh output
     #[inline]
     pub fn is_p2sh(&self) -> bool {
@@ -276,42 +268,6 @@ impl Script {
      || (self.0.len() == 35 &&
             self.0[0] == opcodes::all::OP_PUSHBYTES_33.into_u8() &&
             self.0[34] == opcodes::all::OP_CHECKSIG.into_u8())
-    }
-
-    /// Checks whether a script pubkey is a Segregated Witness (segwit) program.
-    #[inline]
-    pub fn is_witness_program(&self) -> bool {
-        // A scriptPubKey (or redeemScript as defined in BIP16/P2SH) that consists of a 1-byte
-        // push opcode (for 0 to 16) followed by a data push between 2 and 40 bytes gets a new
-        // special meaning. The value of the first push is called the "version byte". The following
-        // byte vector pushed is called the "witness program".
-        let min_vernum: u8 = opcodes::all::OP_PUSHNUM_1.into_u8();
-        let max_vernum: u8 = opcodes::all::OP_PUSHNUM_16.into_u8();
-        self.0.len() >= 4
-            && self.0.len() <= 42
-            // Version 0 or PUSHNUM_1-PUSHNUM_16
-            && (self.0[0] == 0 || self.0[0] >= min_vernum && self.0[0] <= max_vernum)
-            // Second byte push opcode 2-40 bytes
-            && self.0[1] >= opcodes::all::OP_PUSHBYTES_2.into_u8()
-            && self.0[1] <= opcodes::all::OP_PUSHBYTES_40.into_u8()
-            // Check that the rest of the script has the correct size
-            && self.0.len() - 2 == self.0[1] as usize
-    }
-
-    /// Checks whether a script pubkey is a p2wsh output
-    #[inline]
-    pub fn is_v0_p2wsh(&self) -> bool {
-        self.0.len() == 34 &&
-        self.0[0] == opcodes::all::OP_PUSHBYTES_0.into_u8() &&
-        self.0[1] == opcodes::all::OP_PUSHBYTES_32.into_u8()
-    }
-
-    /// Checks whether a script pubkey is a p2wpkh output
-    #[inline]
-    pub fn is_v0_p2wpkh(&self) -> bool {
-        self.0.len() == 22 &&
-            self.0[0] == opcodes::all::OP_PUSHBYTES_0.into_u8() &&
-            self.0[1] == opcodes::all::OP_PUSHBYTES_20.into_u8()
     }
 
     /// Check if this is an OP_RETURN output
@@ -977,26 +933,11 @@ mod test {
     #[test]
     fn p2sh_p2wsh_conversion() {
         // Test vectors taken from Core tests/data/script_tests.json
-        // bare p2wsh
-        let redeem_script = hex_script!("410479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8ac");
-        let expected_witout = hex_script!("0020b95237b48faaa69eb078e1170be3b5cbb3fddf16d0a991e14ad274f7b33a4f64");
-        assert!(redeem_script.to_v0_p2wsh().is_v0_p2wsh());
-        assert_eq!(redeem_script.to_v0_p2wsh(), expected_witout);
-
         // p2sh
         let redeem_script = hex_script!("0479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8");
         let expected_p2shout = hex_script!("a91491b24bf9f5288532960ac687abb035127b1d28a587");
         assert!(redeem_script.to_p2sh().is_p2sh());
         assert_eq!(redeem_script.to_p2sh(), expected_p2shout);
-
-        // p2sh-p2wsh
-        let redeem_script = hex_script!("410479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8ac");
-        let expected_witout = hex_script!("0020b95237b48faaa69eb078e1170be3b5cbb3fddf16d0a991e14ad274f7b33a4f64");
-        let expected_out = hex_script!("a914f386c2ba255cc56d20cfa6ea8b062f8b5994551887");
-        assert!(redeem_script.to_p2sh().is_p2sh());
-        assert!(redeem_script.to_p2sh().to_v0_p2wsh().is_v0_p2wsh());
-        assert_eq!(redeem_script.to_v0_p2wsh(), expected_witout);
-        assert_eq!(redeem_script.to_v0_p2wsh().to_p2sh(), expected_out);
     }
 
     #[test]
