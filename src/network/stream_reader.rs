@@ -338,8 +338,5 @@ mod test {
         assert_eq!(serialize(&block.header.prev_blockhash), prevhash);
         assert_eq!(serialize(&block.header.merkle_root), merkle);
         assert_eq!(block.header.time, 1231965655);
-
-        // should be also ok for a non-witness block as commitment is optional in that case
-        assert!(block.check_witness_commitment());
     }
 }

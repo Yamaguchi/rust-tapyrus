@@ -27,8 +27,8 @@
 
 use std::io;
 
-use hashes::{Hash, HashEngine};
-use hash_types::{Wtxid, BlockHash, TxMerkleNode, WitnessMerkleNode, WitnessCommitment};
+use hashes::Hash;
+use hash_types::{BlockHash, TxMerkleNode};
 use consensus::{encode, Decodable, Encodable};
 use blockdata::transaction::Transaction;
 use util::hash::{bitcoin_merkle_root, BitcoinHash};
@@ -98,33 +98,6 @@ impl Block {
             self.header.im_merkle_root == self.immutable_merkle_root()
     }
 
-    /// check if witness commitment in coinbase is matching the transaction list
-    pub fn check_witness_commitment(&self) -> bool {
-
-        // witness commitment is optional if there are no transactions using SegWit in the block
-        if self.txdata.iter().all(|t| t.input.iter().all(|i| i.witness.is_empty())) {
-            return true;
-        }
-        if self.txdata.len() > 0 {
-            let coinbase = &self.txdata[0];
-            if coinbase.is_coin_base() {
-                // commitment is in the last output that starts with below magic
-                if let Some(pos) = coinbase.output.iter()
-                    .rposition(|o| {
-                        o.script_pubkey.len () >= 38 &&
-                        o.script_pubkey[0..6] == [0x6a, 0x24, 0xaa, 0x21, 0xa9, 0xed] }) {
-                    let commitment = WitnessCommitment::from_slice(&coinbase.output[pos].script_pubkey.as_bytes()[6..38]).unwrap();
-                    // witness reserved value is in coinbase input witness
-                    if coinbase.input[0].witness.len() == 1 && coinbase.input[0].witness[0].len() == 32 {
-                        let witness_root = self.witness_root();
-                        return commitment == Self::compute_witness_commitment(&witness_root, coinbase.input[0].witness[0].as_slice())
-                    }
-                }
-            }
-        }
-        false
-    }
-
     /// Calculate the transaction merkle root.
     pub fn merkle_root(&self) -> TxMerkleNode {
         let hashes = self.txdata.iter().map(|obj| obj.txid().as_hash());
@@ -134,27 +107,6 @@ impl Block {
     /// Calculate the immutable transaction merkle root.
     fn immutable_merkle_root(&self) -> TxMerkleNode {
         let hashes = self.txdata.iter().map(|obj| obj.malfix_txid().as_hash());
-        bitcoin_merkle_root(hashes).into()
-    }
-
-    /// compute witness commitment for the transaction list
-    pub fn compute_witness_commitment (witness_root: &WitnessMerkleNode, witness_reserved_value: &[u8]) -> WitnessCommitment {
-        let mut encoder = WitnessCommitment::engine();
-        witness_root.consensus_encode(&mut encoder).unwrap();
-        encoder.input(witness_reserved_value);
-        WitnessCommitment::from_engine(encoder)
-    }
-
-    /// Merkle root of transactions hashed for witness
-    pub fn witness_root(&self) -> WitnessMerkleNode {
-        let hashes = self.txdata.iter().enumerate().map(|(i, t)|
-            if i == 0 {
-                // Replace the first hash with zeroes.
-                Wtxid::default().as_hash()
-            } else {
-                t.wtxid().as_hash()
-            }
-        );
         bitcoin_merkle_root(hashes).into()
     }
 }
@@ -236,9 +188,6 @@ mod tests {
         assert_eq!(real_decode.header.proof.unwrap(), sig);
         // [test] TODO: check the transaction data
 
-        // should be also ok for a non-witness block as commitment is optional in that case
-        assert!(real_decode.check_witness_commitment());
-
         assert_eq!(serialize(&real_decode), some_block);
     }
 
@@ -277,8 +226,6 @@ mod tests {
         );
         assert_eq!(real_decode.header.time, 1472004949);
         // [test] TODO: check the transaction data
-
-        assert!(real_decode.check_witness_commitment());
 
         assert_eq!(serialize(&real_decode), segwit_block);
     }
