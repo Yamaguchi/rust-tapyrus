@@ -68,7 +68,6 @@ impl PartiallySignedTransaction {
 
         for (vin, psbtin) in tx.input.iter_mut().zip(self.inputs.into_iter()) {
             vin.script_sig = psbtin.final_script_sig.unwrap_or_else(|| Script::new());
-            vin.witness = psbtin.final_script_witness.unwrap_or_else(|| Vec::new());
         }
 
         tx
@@ -260,7 +259,6 @@ mod tests {
                     },
                     script_sig: Script::new(),
                     sequence: 4294967294,
-                    witness: vec![],
                 }],
                 output: vec![
                     TxOut {
@@ -368,7 +366,6 @@ mod tests {
                             },
                             script_sig: Script::new(),
                             sequence: 4294967294,
-                            witness: vec![],
                         }],
                         output: vec![
                             TxOut {
@@ -396,10 +393,6 @@ mod tests {
                             },
                             script_sig: hex_script!("160014be18d152a9b012039daf3da7de4f53349eecb985"),
                             sequence: 4294967295,
-                            witness: vec![
-                                hex_decode("304402202712be22e0270f394f568311dc7ca9a68970b8025fdd3b240229f07f8a5f3a240220018b38d7dcd314e734c9276bd6fb40f673325bc4baa144c800d2f2f02db2765c01").unwrap(),
-                                hex_decode("03d2e15674941bad4a996372cb87e1856d3652606d98562fe39c5e9e7e413f2105").unwrap(),
-                            ],
                         },
                         TxIn {
                             previous_output: OutPoint {
@@ -410,10 +403,6 @@ mod tests {
                             },
                             script_sig: hex_script!("160014fe3e9ef1a745e974d902c4355943abcb34bd5353"),
                             sequence: 4294967295,
-                            witness: vec![
-                                hex_decode("3045022100d12b852d85dcd961d2f5f4ab660654df6eedcc794c0c33ce5cc309ffb5fce58d022067338a8e0e1725c197fb1a88af59f51e44e4255b20167c8684031c05d1f2592a01").unwrap(),
-                                hex_decode("0223b72beef0965d10be0778efecd61fcac6f79a4ea169393380734464f84f2ab3").unwrap(),
-                            ],
                         }],
                         output: vec![
                             TxOut {

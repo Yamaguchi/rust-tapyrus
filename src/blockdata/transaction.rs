@@ -199,14 +199,8 @@ pub struct TxIn {
     /// to ignore this feature. This is generally never used since
     /// the miner behaviour cannot be enforced.
     pub sequence: u32,
-    /// Witness data: an array of byte-arrays.
-    /// Note that this field is *not* (de)serialized with the rest of the TxIn in
-    /// Encodable/Decodable, as it is (de)serialized at the end of the full
-    /// Transaction. It *is* (de)serialized with the rest of the TxIn in other
-    /// (de)serialization routines.
-    pub witness: Vec<Vec<u8>>
 }
-serde_struct_impl!(TxIn, previous_output, script_sig, sequence, witness);
+serde_struct_impl!(TxIn, previous_output, script_sig, sequence);
 
 impl Default for TxIn {
     fn default() -> TxIn {
@@ -214,7 +208,6 @@ impl Default for TxIn {
             previous_output: OutPoint::default(),
             script_sig: Script::new(),
             sequence: u32::max_value(),
-            witness: Vec::new(),
         }
     }
 }
@@ -288,7 +281,7 @@ impl Transaction {
         let cloned_tx = Transaction {
             version: self.version,
             lock_time: self.lock_time,
-            input: self.input.iter().map(|txin| TxIn { script_sig: Script::new(), witness: vec![], .. *txin }).collect(),
+            input: self.input.iter().map(|txin| TxIn { script_sig: Script::new(), .. *txin }).collect(),
             output: self.output.clone(),
         };
         cloned_tx.txid().into()
@@ -372,7 +365,6 @@ impl Transaction {
                 previous_output: self.input[input_index].previous_output,
                 script_sig: script_pubkey.clone(),
                 sequence: self.input[input_index].sequence,
-                witness: vec![],
             }];
         } else {
             tx.input = Vec::with_capacity(self.input.len());
@@ -381,7 +373,6 @@ impl Transaction {
                     previous_output: input.previous_output,
                     script_sig: if n == input_index { script_pubkey.clone() } else { Script::new() },
                     sequence: if n != input_index && (sighash == SigHashType::Single || sighash == SigHashType::None) { 0 } else { input.sequence },
-                    witness: vec![],
                 });
             }
         }
@@ -411,18 +402,10 @@ impl Transaction {
     #[inline]
     pub fn get_weight(&self) -> usize {
         let mut input_weight = 0;
-        let mut inputs_with_witnesses = 0;
         for input in &self.input {
             input_weight += 4*(32 + 4 + 4 + // outpoint (32+4) + nSequence
                 VarInt(input.script_sig.len() as u64).len() +
                 input.script_sig.len());
-            if !input.witness.is_empty() {
-                inputs_with_witnesses += 1;
-                input_weight += VarInt(input.witness.len() as u64).len();
-                for elem in &input.witness {
-                    input_weight += VarInt(elem.len() as u64).len() + elem.len();
-                }
-            }
         }
         let mut output_size = 0;
         for output in &self.output {
@@ -439,11 +422,7 @@ impl Transaction {
         output_size +
         // lock_time
         4;
-        if inputs_with_witnesses == 0 {
-            non_input_size * 4 + input_weight
-        } else {
-            non_input_size * 4 + input_weight + self.input.len() - inputs_with_witnesses + 2
-        }
+        non_input_size * 4 + input_weight
     }
 
     #[cfg(feature="bitcoinconsensus")]
@@ -506,7 +485,6 @@ impl Decodable for TxIn {
             previous_output: Decodable::consensus_decode(&mut d)?,
             script_sig: Decodable::consensus_decode(&mut d)?,
             sequence: Decodable::consensus_decode(d)?,
-            witness: vec![],
         })
     }
 }
@@ -518,25 +496,8 @@ impl Encodable for Transaction {
     ) -> Result<usize, encode::Error> {
         let mut len = 0;
         len += self.version.consensus_encode(&mut s)?;
-        let mut have_witness = self.input.is_empty();
-        for input in &self.input {
-            if !input.witness.is_empty() {
-                have_witness = true;
-                break;
-            }
-        }
-        if !have_witness {
-            len += self.input.consensus_encode(&mut s)?;
-            len += self.output.consensus_encode(&mut s)?;
-        } else {
-            len += 0u8.consensus_encode(&mut s)?;
-            len += 1u8.consensus_encode(&mut s)?;
-            len += self.input.consensus_encode(&mut s)?;
-            len += self.output.consensus_encode(&mut s)?;
-            for input in &self.input {
-                len += input.witness.consensus_encode(&mut s)?;
-            }
-        }
+        len += self.input.consensus_encode(&mut s)?;
+        len += self.output.consensus_encode(&mut s)?;
         len += self.lock_time.consensus_encode(s)?;
         Ok(len)
     }
@@ -546,42 +507,12 @@ impl Decodable for Transaction {
     fn consensus_decode<D: io::Read>(mut d: D) -> Result<Self, encode::Error> {
         let version = u32::consensus_decode(&mut d)?;
         let input = Vec::<TxIn>::consensus_decode(&mut d)?;
-        // segwit
-        if input.is_empty() {
-            let segwit_flag = u8::consensus_decode(&mut d)?;
-            match segwit_flag {
-                // BIP144 input witnesses
-                1 => {
-                    let mut input = Vec::<TxIn>::consensus_decode(&mut d)?;
-                    let output = Vec::<TxOut>::consensus_decode(&mut d)?;
-                    for txin in input.iter_mut() {
-                        txin.witness = Decodable::consensus_decode(&mut d)?;
-                    }
-                    if !input.is_empty() && input.iter().all(|input| input.witness.is_empty()) {
-                        Err(encode::Error::ParseFailed("witness flag set but no witnesses present"))
-                    } else {
-                        Ok(Transaction {
-                            version: version,
-                            input: input,
-                            output: output,
-                            lock_time: Decodable::consensus_decode(d)?,
-                        })
-                    }
-                }
-                // We don't support anything else
-                x => {
-                    Err(encode::Error::UnsupportedSegwitFlag(x))
-                }
-            }
-        // non-segwit
-        } else {
-            Ok(Transaction {
-                version: version,
-                input: input,
-                output: Decodable::consensus_decode(&mut d)?,
-                lock_time: Decodable::consensus_decode(d)?,
-            })
-        }
+        Ok(Transaction {
+            version: version,
+            input: input,
+            output: Decodable::consensus_decode(&mut d)?,
+            lock_time: Decodable::consensus_decode(d)?,
+        })
     }
 }
 
@@ -646,7 +577,6 @@ mod tests {
 
     use std::str::FromStr;
     use blockdata::script::Script;
-    use consensus::encode::serialize;
     use consensus::encode::deserialize;
 
     use hashes::Hash;
@@ -700,7 +630,6 @@ mod tests {
         assert_eq!(txin.script_sig, Script::new());
         assert_eq!(txin.sequence, 0xFFFFFFFF);
         assert_eq!(txin.previous_output, OutPoint::default());
-        assert_eq!(txin.witness.len(), 0 as usize);
     }
 
     #[test]
@@ -741,51 +670,6 @@ mod tests {
     }
 
     #[test]
-    fn test_segwit_transaction() {
-        let hex_tx = Vec::<u8>::from_hex(
-            "02000000000101595895ea20179de87052b4046dfe6fd515860505d6511a9004cf12a1f93cac7c01000000\
-            00ffffffff01deb807000000000017a9140f3444e271620c736808aa7b33e370bd87cb5a078702483045022\
-            100fb60dad8df4af2841adc0346638c16d0b8035f5e3f3753b88db122e70c79f9370220756e6633b17fd271\
-            0e626347d28d60b0a2d6cbb41de51740644b9fb3ba7751040121028fa937ca8cba2197a37c007176ed89410\
-            55d3bcb8627d085e94553e62f057dcc00000000"
-        ).unwrap();
-        let tx: Result<Transaction, _> = deserialize(&hex_tx);
-        assert!(tx.is_ok());
-        let realtx = tx.unwrap();
-        // All these tests aren't really needed because if they fail, the hash check at the end
-        // will also fail. But these will show you where the failure is so I'll leave them in.
-        assert_eq!(realtx.version, 2);
-        assert_eq!(realtx.input.len(), 1);
-        // In particular this one is easy to get backward -- in bitcoin hashes are encoded
-        // as little-endian 256-bit numbers rather than as data strings.
-        assert_eq!(format!("{:x}", realtx.input[0].previous_output.txid),
-                   "7cac3cf9a112cf04901a51d605058615d56ffe6d04b45270e89d1720ea955859".to_string());
-        assert_eq!(realtx.input[0].previous_output.vout, 1);
-        assert_eq!(realtx.output.len(), 1);
-        assert_eq!(realtx.lock_time, 0);
-
-        assert_eq!(format!("{:x}", realtx.txid()),
-                   "f5864806e3565c34d1b41e716f72609d00b55ea5eac5b924c9719a842ef42206".to_string());
-        assert_eq!(format!("{:x}", realtx.wtxid()),
-                   "80b7d8a82d5d5bf92905b06f2014dd699e03837ca172e3a59d51426ebbe3e7f5".to_string());
-        assert_eq!(realtx.get_weight(), 442);
-    }
-
-    #[test]
-    fn tx_no_input_deserialization() {
-        let hex_tx = Vec::<u8>::from_hex(
-            "010000000001000100e1f505000000001976a9140389035a9225b3839e2bbf32d826a1e222031fd888ac00000000"
-        ).unwrap();
-        let tx: Transaction = deserialize(&hex_tx).expect("deserialize tx");
-
-        assert_eq!(tx.input.len(), 0);
-        assert_eq!(tx.output.len(), 1);
-
-        let reser = serialize(&tx);
-        assert_eq!(hex_tx, reser);
-    }
-
-    #[test]
     fn test_ntxid() {
         let hex_tx = Vec::<u8>::from_hex("0100000001a15d57094aa7a21a28cb20b59aab8fc7d1149a3bdbcddba9c622e4f5f6a99ece010000006c493046022100f93bb0e7d8db7bd46e40132d1f8242026e045f03a0efe71bbb8e3f475e970d790221009337cd7f1f929f00cc6ff01f03729b069a7c21b59b1736ddfee5db5946c5da8c0121033b9b137ee87d5a812d6f506efdd37f0affa7ffc310711c06c7f3e097c9447c52ffffffff0100e1f505000000001976a9140389035a9225b3839e2bbf32d826a1e222031fd888ac00000000").unwrap();
         let mut tx: Transaction = deserialize(&hex_tx).unwrap();
@@ -802,43 +686,6 @@ mod tests {
 
     #[test]
     fn test_txid() {
-        // segwit tx from Liquid integration tests, txid/hash from Core decoderawtransaction
-        let hex_tx = Vec::<u8>::from_hex(
-            "01000000000102ff34f95a672bb6a4f6ff4a7e90fa8c7b3be7e70ffc39bc99be3bda67942e836c00000000\
-             23220020cde476664d3fa347b8d54ef3aee33dcb686a65ced2b5207cbf4ec5eda6b9b46e4f414d4c934ad8\
-             1d330314e888888e3bd22c7dde8aac2ca9227b30d7c40093248af7812201000000232200200af6f6a071a6\
-             9d5417e592ed99d256ddfd8b3b2238ac73f5da1b06fc0b2e79d54f414d4c0ba0c8f505000000001976a914\
-             dcb5898d9036afad9209e6ff0086772795b1441088ac033c0f000000000017a914889f8c10ff2bd4bb9dab\
-             b68c5c0d700a46925e6c87033c0f000000000017a914889f8c10ff2bd4bb9dabb68c5c0d700a46925e6c87\
-             033c0f000000000017a914889f8c10ff2bd4bb9dabb68c5c0d700a46925e6c87033c0f000000000017a914\
-             889f8c10ff2bd4bb9dabb68c5c0d700a46925e6c87033c0f000000000017a914889f8c10ff2bd4bb9dabb6\
-             8c5c0d700a46925e6c87033c0f000000000017a914889f8c10ff2bd4bb9dabb68c5c0d700a46925e6c8703\
-             3c0f000000000017a914889f8c10ff2bd4bb9dabb68c5c0d700a46925e6c87033c0f000000000017a91488\
-             9f8c10ff2bd4bb9dabb68c5c0d700a46925e6c87033c0f000000000017a914889f8c10ff2bd4bb9dabb68c\
-             5c0d700a46925e6c87033c0f000000000017a914889f8c10ff2bd4bb9dabb68c5c0d700a46925e6c870500\
-             47304402200380b8663e727d7e8d773530ef85d5f82c0b067c97ae927800a0876a1f01d8e2022021ee611e\
-             f6507dfd217add2cd60a8aea3cbcfec034da0bebf3312d19577b8c290147304402207bd9943ce1c2c5547b\
-             120683fd05d78d23d73be1a5b5a2074ff586b9c853ed4202202881dcf435088d663c9af7b23efb3c03b9db\
-             c0c899b247aa94a74d9b4b3c84f501483045022100ba12bba745af3f18f6e56be70f8382ca8e107d1ed5ce\
-             aa3e8c360d5ecf78886f022069b38ebaac8fe6a6b97b497cbbb115f3176f7213540bef08f9292e5a72de52\
-             de01695321023c9cd9c6950ffee24772be948a45dc5ef1986271e46b686cb52007bac214395a2102756e27\
-             cb004af05a6e9faed81fd68ff69959e3c64ac8c9f6cd0e08fd0ad0e75d2103fa40da236bd82202a985a910\
-             4e851080b5940812685769202a3b43e4a8b13e6a53ae050048304502210098b9687b81d725a7970d1eee91\
-             ff6b89bc9832c2e0e3fb0d10eec143930b006f02206f77ce19dc58ecbfef9221f81daad90bb4f468df3912\
-             12abc4f084fe2cc9bdef01483045022100e5479f81a3ad564103da5e2ec8e12f61f3ac8d312ab68763c1dd\
-             d7bae94c20610220789b81b7220b27b681b1b2e87198897376ba9d033bc387f084c8b8310c8539c2014830\
-             45022100aa1cc48a2d256c0e556616444cc08ae4959d464e5ffff2ae09e3550bdab6ce9f02207192d5e332\
-             9a56ba7b1ead724634d104f1c3f8749fe6081e6233aee3e855817a016953210260de9cc68658c61af984e3\
-             ab0281d17cfca1cc035966d335f474932d5e6c5422210355fbb768ce3ce39360277345dbb5f376e706459e\
-             5a2b5e0e09a535e61690647021023222ceec58b94bd25925dd9743dae6b928737491bd940fc5dd7c6f5d5f\
-             2adc1e53ae00000000"
-        ).unwrap();
-        let tx: Transaction = deserialize(&hex_tx).unwrap();
-
-        assert_eq!(format!("{:x}", tx.wtxid()), "d6ac4a5e61657c4c604dcde855a1db74ec6b3e54f32695d72c5e11c7761ea1b4");
-        assert_eq!(format!("{:x}", tx.txid()), "9652aa62b0e748caeec40c4cb7bc17c6792435cc3dfe447dd1ca24f912a1c6ec");
-        assert_eq!(tx.get_weight(), 2718);
-
         // non-segwit tx from my mempool
         let hex_tx = Vec::<u8>::from_hex(
             "01000000010c7196428403d8b0c88fcb3ee8d64f56f55c8973c9ab7dd106bb4f3527f5888d000000006a47\
@@ -850,7 +697,6 @@ mod tests {
         ).unwrap();
         let tx: Transaction = deserialize(&hex_tx).unwrap();
 
-        assert_eq!(format!("{:x}", tx.wtxid()), "971ed48a62c143bbd9c87f4bafa2ef213cfa106c6e140f111931d0be307468dd");
         assert_eq!(format!("{:x}", tx.txid()), "971ed48a62c143bbd9c87f4bafa2ef213cfa106c6e140f111931d0be307468dd");
     }
 

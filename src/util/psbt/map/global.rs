@@ -39,10 +39,6 @@ impl Global {
             if !txin.script_sig.is_empty() {
                 return Err(Error::UnsignedTxHasScriptSigs);
             }
-
-            if !txin.witness.is_empty() {
-                return Err(Error::UnsignedTxHasScriptWitnesses);
-            }
         }
 
         Ok(Global {

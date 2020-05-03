@@ -71,7 +71,6 @@ fn bitcoin_genesis_tx() -> Transaction {
         previous_output: OutPoint::null(),
         script_sig: in_script,
         sequence: MAX_SEQUENCE,
-        witness: vec![],
     });
 
     // Outputs
